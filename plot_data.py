@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import socket
 import struct
+import math
 
 # =========================
 # UDP SOCKET (single port)
@@ -31,7 +32,7 @@ y_pitch = []
 
 def receiveData():
     outgauge = None
-    pitch = None
+    pitch_deg = None
 
     while True:
         try:
@@ -57,9 +58,10 @@ def receiveData():
             unpacked = struct.unpack("4s21f", data)
 
             if unpacked[0] == b"BNG1":
-                pitch = unpacked[13]  # pitchPos (radians)
+                pitch_rad = unpacked[14]       # pitchPos in radians
+                pitch_deg = math.degrees(pitch_rad)
 
-    return outgauge, pitch
+    return outgauge, pitch_deg
 
 # =========================
 # PLOTTING SETUP
@@ -108,7 +110,7 @@ def animate(i):
     ax2.set_ylim(-500, 10000)
     ax3.set_ylim(-5, 180)
     ax4.set_ylim(-5, 105)
-    ax5.set_ylim(-1.2, 1.2)  # radians
+    ax5.set_ylim(-20, 20)  # degrees
 
     ax1.plot(x_vals, y_throttle, label="Throttle", color="blue")
     ax1.plot(x_vals, y_brake, label="Brake", color="red")
@@ -124,7 +126,7 @@ def animate(i):
     ax2.set_ylabel("RPM")
     ax3.set_ylabel("Speed (MPH)")
     ax4.set_ylabel("Fuel (%)")
-    ax5.set_ylabel("Pitch (rad)")
+    ax5.set_ylabel("Pitch (deg)")
 
     plt.tight_layout()
 
