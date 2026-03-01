@@ -1,63 +1,20 @@
-# Plotting imports
-
 from itertools import count
-import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
-
-# UDP set up
-
 import socket
 import struct
 
-
-# Create UDP socket.
+# =========================
+# UDP SOCKET (single port)
+# =========================
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-# BeamNG BNG1 socket (vehicle dynamics)
-sock_bng = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock_bng.bind(("127.0.0.1", 62689))
-sock_bng.setblocking(False)
-
-
-# Bind to BeamNG OutGauge.
-
 sock.bind(("127.0.0.1", 4444))
 sock.setblocking(False)
 
-
-# Receive UDP data and unpack
-
-
-def receiveData():
-    data = None
-
-    while True:
-        try:
-            data, fromAddr = sock.recvfrom(4096)
-        except socket.error:
-            break
-
-    if data is None:
-        return None, None, None, None, None, None
-    outsim_pack = struct.unpack("I4sH2c7f2I3f16s16si", data)
-    gear = outsim_pack[3]
-    speed = 2.23694 * outsim_pack[5]
-    rpm = outsim_pack[6]
-    engTemp = outsim_pack[8]
-    fuel = 100 * outsim_pack[9]
-    throttle = 100 * outsim_pack[14]
-    brake = 100 * outsim_pack[15]
-    clutch = 100 * outsim_pack[16]
-    # print(f"RPM: {rpm:4.0f} Speed: {speed:3.0f}")
-    return throttle, brake, clutch, rpm, speed, fuel
-
-
-# Real-time graph
-
-plt.style.use("fivethirtyeight")
+# =========================
+# DATA BUFFERS
+# =========================
 
 x_vals = []
 y_throttle = []
@@ -66,20 +23,70 @@ y_clutch = []
 y_rpm = []
 y_speed = []
 y_fuel = []
+y_pitch = []
 
-# Settings for subplots (Total number of plots, column position, row position)
+# =========================
+# PACKET RECEIVER
+# =========================
 
-fig = plt.figure(figsize=(12, 12))
-ax1 = fig.add_subplot(4, 1, 1)
-ax2 = fig.add_subplot(4, 1, 2)
-ax3 = fig.add_subplot(4, 1, 3)
-ax4 = fig.add_subplot(4, 1, 4)
+def receiveData():
+    outgauge = None
+    pitch = None
 
+    while True:
+        try:
+            data, addr = sock.recvfrom(4096)
+        except socket.error:
+            break
+
+        # ---------- OutGauge packet (96 bytes) ----------
+        if len(data) == 96:
+            unpacked = struct.unpack("I4sH2c7f2I3f16s16si", data)
+
+            speed = unpacked[5] * 2.23694  # m/s → mph
+            rpm = unpacked[6]
+            fuel = unpacked[9] * 100
+            throttle = unpacked[14] * 100
+            brake = unpacked[15] * 100
+            clutch = unpacked[16] * 100
+
+            outgauge = (throttle, brake, clutch, rpm, speed, fuel)
+
+        # ---------- BeamNG vehicle dynamics packet (88 bytes) ----------
+        elif len(data) == 88:
+            unpacked = struct.unpack("4s21f", data)
+
+            if unpacked[0] == b"BNG1":
+                pitch = unpacked[13]  # pitchPos (radians)
+
+    return outgauge, pitch
+
+# =========================
+# PLOTTING SETUP
+# =========================
+
+plt.style.use("fivethirtyeight")
+
+fig = plt.figure(figsize=(12, 14))
+ax1 = fig.add_subplot(5, 1, 1)
+ax2 = fig.add_subplot(5, 1, 2)
+ax3 = fig.add_subplot(5, 1, 3)
+ax4 = fig.add_subplot(5, 1, 4)
+ax5 = fig.add_subplot(5, 1, 5)
+
+index = count()
+
+# =========================
+# ANIMATION LOOP
+# =========================
 
 def animate(i):
+    outgauge, pitch = receiveData()
 
-    throttle, brake, clutch, rpm, speed, fuel = receiveData()
-    print(throttle, brake, clutch, rpm, speed, fuel)
+    if outgauge is None:
+        return
+
+    throttle, brake, clutch, rpm, speed, fuel = outgauge
 
     x_vals.append(next(index))
     y_throttle.append(throttle)
@@ -88,51 +95,44 @@ def animate(i):
     y_rpm.append(rpm)
     y_speed.append(speed)
     y_fuel.append(fuel)
+    y_pitch.append(pitch if pitch is not None else 0)
 
-    # Needed to stop graphs changing colours
-
-    ax1.clear()
-    ax2.clear()
-    ax3.clear()
-    ax4.clear()
-
-    # Moving x axis
+    for ax in (ax1, ax2, ax3, ax4, ax5):
+        ax.clear()
 
     if len(x_vals) > 100:
-        ax1.set_xlim(x_vals[-100], x_vals[-1])
-        ax2.set_xlim(x_vals[-100], x_vals[-1])
-        ax3.set_xlim(x_vals[-100], x_vals[-1])
-        ax4.set_xlim(x_vals[-100], x_vals[-1])
-
-    # Setting vertical axis limits
+        for ax in (ax1, ax2, ax3, ax4, ax5):
+            ax.set_xlim(x_vals[-100], x_vals[-1])
 
     ax1.set_ylim(-5, 105)
-    ax2.set_ylim(-150, 10000)
+    ax2.set_ylim(-500, 10000)
     ax3.set_ylim(-5, 180)
     ax4.set_ylim(-5, 105)
+    ax5.set_ylim(-1.2, 1.2)  # radians
 
-    # Plotting graphs, with labels and colours
+    ax1.plot(x_vals, y_throttle, label="Throttle", color="blue")
+    ax1.plot(x_vals, y_brake, label="Brake", color="red")
+    ax1.plot(x_vals, y_clutch, label="Clutch", color="green")
+    ax1.legend(loc="upper left")
 
-    ax1.plot(x_vals, y_throttle, lw=1, color="blue")
-    ax1.plot(x_vals, y_brake, lw=1, color="red")
-    ax1.plot(x_vals, y_clutch, lw=1, color="green")
-    ax2.plot(x_vals, y_rpm, lw=1, color="black")
-    ax3.plot(x_vals, y_speed, lw=1, color="black")
-    ax4.plot(x_vals, y_fuel, lw=1, color="black")
+    ax2.plot(x_vals, y_rpm, color="black")
+    ax3.plot(x_vals, y_speed, color="black")
+    ax4.plot(x_vals, y_fuel, color="black")
+    ax5.plot(x_vals, y_pitch, color="purple")
 
-    ax1.set_ylabel("Throttle, brake, clutch (%)")
+    ax1.set_ylabel("Pedals (%)")
     ax2.set_ylabel("RPM")
     ax3.set_ylabel("Speed (MPH)")
     ax4.set_ylabel("Fuel (%)")
+    ax5.set_ylabel("Pitch (rad)")
 
     plt.tight_layout()
 
+# =========================
+# START
+# =========================
 
-index = count()
 ani = FuncAnimation(fig, animate, interval=10)
-
 plt.show()
 
-
-# Release the socket.
 sock.close()
